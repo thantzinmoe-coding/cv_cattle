@@ -1,0 +1,29 @@
+{
+  "dataset": "C:\\Users\\Thant Zin Moe\\Desktop\\Gintama\\Ai-Project\\cv-cattle-project\\dataset",
+  "keypoint_count": 12,
+  "expected_fields_per_object": 41,
+  "splits": {
+    "train": {
+      "images": 126,
+      "labels": 126,
+      "objects": 124
+    },
+    "val": {
+      "images": 36,
+      "labels": 36,
+      "objects": 36
+    },
+    "test": {
+      "images": 19,
+      "labels": 19,
+      "objects": 19
+    }
+  },
+  "visibility_counts": {
+    "0": 731,
+    "2": 1417
+  },
+  "errors": [],
+  "warnings": [],
+  "valid": true
+}

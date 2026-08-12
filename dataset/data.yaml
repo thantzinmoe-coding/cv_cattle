@@ -1,0 +1,25 @@
+path: c:/Users/Thant Zin Moe/Desktop/Gintama/Ai-Project/cv-cattle-project/dataset
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: cow
+
+# Source order: https://www.kaggle.com/datasets/zaidworks0508/cow-pose-estimation-dataset
+kpt_shape: [12, 3]
+kpt_names:
+  0:
+    - nose
+    - right_eye
+    - left_eye
+    - neck_side
+    - left_front_hoof
+    - right_front_hoof
+    - left_back_hoof
+    - right_back_hoof
+    - backbone_side
+    - tail_root
+    - backpose_center
+    - stomach_center
+flip_idx: [0, 2, 1, 3, 5, 4, 7, 6, 8, 9, 10, 11]
