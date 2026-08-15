@@ -1,0 +1,5 @@
+Classes: 
+	1. Cow
+
+Train set images = 139
+Validation set images = 42
