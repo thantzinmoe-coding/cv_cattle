@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-METRICS_FILE = PROJECT_ROOT / "outputs" / "metrics" / "test_metrics.json"
+METRICS_FILE = PROJECT_ROOT / "outputs" / "metrics" / "count_test_metrics.json"
 
 _eval_status: str = "idle"  # idle | running | done | error
 _eval_error: str = ""
@@ -18,7 +18,7 @@ def _run_evaluation():
     try:
         import sys
         sys.path.insert(0, str(PROJECT_ROOT))
-        from evaluate import evaluate_model
+        from core.evaluate import evaluate_model
         evaluate_model()
         _eval_status = "done"
     except Exception as e:

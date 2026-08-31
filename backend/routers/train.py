@@ -16,8 +16,8 @@ _train_status: str = "idle"  # idle | running | done | error
 
 
 class TrainConfig(BaseModel):
-    epochs: int = 50
-    imgsz: int = 640
+    epochs: int = 10
+    imgsz: int = 416
 
 
 @router.post("/start")
@@ -34,7 +34,7 @@ def start_training(config: TrainConfig):
         f"""
 import sys
 sys.path.insert(0, r'{PROJECT_ROOT}')
-from train import train_model
+from core.train import train_model
 train_model(epochs={config.epochs}, imgsz={config.imgsz})
 """,
     ]
@@ -66,7 +66,7 @@ def get_status():
         else:
             _train_status = "error"
 
-    model_exists = (PROJECT_ROOT / "outputs" / "models" / "cattle_pose_best.pt").exists()
+    model_exists = (PROJECT_ROOT / "outputs" / "models" / "cattle_count_best.pt").exists()
     return {"status": _train_status, "trained_model_exists": model_exists}
 
 

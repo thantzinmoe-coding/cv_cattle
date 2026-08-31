@@ -9,11 +9,9 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/train': 'http://localhost:8000',
-      '/predict': 'http://localhost:8000',
-      '/evaluate': 'http://localhost:8000',
-      '/outputs': 'http://localhost:8000',
-      '/health': 'http://localhost:8000',
+      '/predict':  { target: 'http://localhost:8000', ws: true },  // ws:true enables WebSocket proxying
+      '/outputs':  'http://localhost:8000',
+      '/health':   'http://localhost:8000',
     },
   },
 })

@@ -11,12 +11,12 @@ mimetypes.init()
 mimetypes.add_type("video/webm", ".webm")
 mimetypes.add_type("video/mp4", ".mp4")
 
-# Ensure project root is on the path so train/predict/evaluate can be imported
+# Ensure project root is on the path so prediction modules can be imported
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.routers import train, predict, evaluate
+from backend.routers import predict
 
-app = FastAPI(title="Cattle Pose Estimation API", version="1.0.0")
+app = FastAPI(title="Cattle Counting API", version="1.0.0")
 
 # Allow requests from the Vite dev server
 app.add_middleware(
@@ -32,15 +32,14 @@ outputs_dir = Path(__file__).parent.parent / "outputs"
 outputs_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/outputs", StaticFiles(directory=str(outputs_dir)), name="outputs")
 
-app.include_router(train.router, prefix="/train", tags=["Training"])
 app.include_router(predict.router, prefix="/predict", tags=["Prediction"])
-app.include_router(evaluate.router, prefix="/evaluate", tags=["Evaluation"])
 
 
 @app.get("/health")
 def health_check():
-    model_path = Path(__file__).parent.parent / "outputs" / "models" / "cattle_pose_best.pt"
+    model_path = Path(__file__).parent.parent / "outputs" / "models" / "cattle_count_best.pt"
     return {
         "status": "ok",
+        "model_available": model_path.exists(),
         "trained_model_exists": model_path.exists(),
     }

@@ -1,84 +1,68 @@
-# Cattle Body Pose Estimation and Cow Counting System
+# HerdWatch Cattle Monitoring System
 
-A complete end-to-end YOLOv8-based system designed to detect cattle, estimate 12 critical body keypoints, and count individual cows in static images and dynamic video streams using ByteTrack object tracking.
+Camera-based cattle detection, counting, tracking, and movement observation for
+images, recorded videos, and a live browser camera.
 
-## Project Structure
+## Setup
+
+```powershell
+pip install -r requirements.txt
+cd frontend
+npm install
+```
+
+## Detection model
+
+The deployed cattle detection model must exist at:
+
 ```text
-cattle-pose-estimation/
-├── dataset/
-│   ├── data.yaml
-│   ├── images/  (train, val, test)
-│   └── labels/  (train, val, test)
-├── scripts/
-│   ├── inspect_dataset.py
-│   ├── convert_coco_to_yolo.py
-│   └── visualize_results.py
-├── train.py
-├── evaluate.py
-├── predict.py
-├── outputs/
-│   ├── models/
-│   ├── metrics/
-│   ├── plots/
-│   ├── predictions/
-│   └── comparison/
-└── requirements.txt
+outputs/models/cattle_count_best.pt
 ```
 
-## Setup Instructions
+Model development is intentionally kept outside the monitoring application.
+The web UI and public API do not expose training or evaluation controls.
 
-1. **Install dependencies**:
-   Ensure you have Python 3.11+ installed.
-   ```bash
-   pip install -r requirements.txt
-   ```
+## Predict and count
 
-2. **Prepare Dataset**:
-   Download the [Kaggle Cow Pose Estimation Dataset](https://www.kaggle.com/datasets/zaidworks0508/cow-pose-estimation-dataset).
-   - Convert COCO labels to YOLO format and automatically split into Train (70%), Val (20%), and Test (10%):
-     ```bash
-     python scripts/convert_coco_to_yolo.py --json <path-to-annotations.json> --images <path-to-raw-images>
-     ```
-   - Optionally inspect the COCO dataset constraints before processing:
-     ```bash
-     python scripts/inspect_dataset.py --json <path-to-annotations.json>
-     ```
-
-## Usage Pipeline
-
-### 1. Training
-Fine-tune the YOLOv8 nano pose model (`yolov8n-pose.pt`) for 50 epochs globally tracking training bounds.
-```bash
-python train.py
-```
-*Outputs are saved symmetrically in `outputs/models/cattle_pose_best.pt`, metrics in `outputs/metrics/`, and plots in `outputs/plots/`.*
-
-### 2. Evaluation
-Validate the final model's keypoint and bounding box Mean Average Precision (`mAP@50` & `mAP@50-95`) exclusively on the 10% test split:
-```bash
-python evaluate.py
-```
-*Outputs JSON metrics and CSV payload in `outputs/metrics/test_metrics.json` and `.csv`.*
-
-### 3. Prediction & Cow Counting
-Run static frame or temporally tracked tracking via ByteTrack across any source. The system ensures robust persistence avoiding duplicate cow-counting in videos.
-```bash
-# Images
-python predict.py --source image.jpg
-
-# Video
-python predict.py --source video.mp4
-```
-*Stores predicted overlays dynamically mapped to `outputs/predictions/` and tracking logs to `outputs/metrics/counting_results.json`.*
-
-### 4. Visualization
-Compare Ground Truth predictions with generated model estimates efficiently.
-```bash
-python scripts/visualize_results.py
+```powershell
+python -m core.predict --source path\to\image.jpg
+python -m core.predict --source path\to\video.mp4
 ```
 
-## Metrics & Configurations
-* **Architecture:** YOLOv8 Pose.
-* **Evaluation Core:** Dataset predictions are graded on `Pose mAP@50` and `Pose mAP@50-95` exclusively as requested.
-* **Seed Lock:** Hardcoded random seed (`42`) mapping exact 70/20/10 splits for consistent reproducibility.
-"# cv_cattle" 
+Annotated output is stored in `outputs/predictions`. The latest count and
+per-cow movement conditions are stored in `outputs/metrics/counting_results.json`.
+
+## Run the web app
+
+In one terminal:
+
+```powershell
+uvicorn backend.main:app --reload
+```
+
+In another terminal:
+
+```powershell
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:5173`. The interface provides:
+
+- Image and recorded-video analysis
+- Live browser-camera monitoring
+- Directional virtual-line counting with stable tracking IDs
+- Configurable counting-line orientation, position, confidence, and camera ROI
+- Separate cumulative crossing, forward/reverse, and visible-cattle counts
+- Normal movement, low movement, high activity, and observing signals
+- Detection confidence and observation duration for each tracked cow
+
+For walkway counting, place the virtual line across the direction of travel:
+use a vertical line for left/right movement or a horizontal line for up/down
+movement. A tracked animal is counted once per session after it moves fully
+through the line's hysteresis zone. Uploaded analyses use isolated job IDs and
+write their metrics under `outputs/metrics/jobs`.
+
+Movement conditions are visual observations only. They are not veterinary
+diagnoses and must not be used to determine illness, pain, pregnancy, or
+lameness without a qualified veterinarian.

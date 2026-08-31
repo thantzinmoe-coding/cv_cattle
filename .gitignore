@@ -14,8 +14,18 @@ weights/
 *.pt
 cv_cattle/weights/
 cv_cattle/runs/
-outputs/
+/outputs/
 cv_cattle/outputs/
+runs/
+backend/outputs/
+
+# Keep only the deployed counting model in Git. Datasets, generated media,
+# training runs, and temporary checkpoints remain local.
+!/outputs/
+/outputs/*
+!/outputs/models/
+/outputs/models/*
+!/outputs/models/cattle_count_best.pt
 
 # Node
 node_modules/
