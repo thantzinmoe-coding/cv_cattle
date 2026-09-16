@@ -19,13 +19,15 @@ cv_cattle/outputs/
 runs/
 backend/outputs/
 
-# Keep only the deployed counting model in Git. Datasets, generated media,
-# training runs, and temporary checkpoints remain local.
+# Keep only the deployed models and lameness evaluation summary in Git.
+# Datasets, generated media, training runs, and temporary checkpoints remain local.
 !/outputs/
 /outputs/*
 !/outputs/models/
 /outputs/models/*
 !/outputs/models/cattle_count_best.pt
+!/outputs/models/lame_checkpoint.joblib
+!/outputs/models/lame_checkpoint.metrics.json
 
 # Node
 node_modules/

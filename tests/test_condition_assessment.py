@@ -6,7 +6,12 @@ from core.predict import (
     LineCrossingCounter,
     _needs_dense_pass,
     _nms_detections,
+    _peak_frame_count,
+    _reported_video_count,
     assess_track_condition,
+    consolidate_track_results,
+    limit_reported_tracks,
+    reconcile_condition_results,
 )
 
 
@@ -35,6 +40,67 @@ def test_large_motion_is_reported_as_high_activity():
     assert result["status"] == "HIGH ACTIVITY"
 
 
+def test_lameness_flag_overrides_a_generic_normal_movement_label():
+    conditions = {
+        "1": {
+            "status": "NORMAL MOVEMENT",
+            "severity": "normal",
+            "description": "Movement is within the expected tracking range.",
+        }
+    }
+    lameness = {"1": {"status": "POSSIBLE LAMENESS", "confidence": 0.92}}
+
+    result = reconcile_condition_results(conditions, lameness)
+
+    assert result["1"]["status"] == "POSSIBLE LAMENESS"
+    assert result["1"]["severity"] == "watch"
+    assert result["1"]["baseline_movement_status"] == "NORMAL MOVEMENT"
+    assert result["1"]["lameness_confidence"] == 0.92
+
+
+def test_fragmented_tracker_ids_are_consolidated_into_logical_cattle():
+    histories = {
+        1: [[0.1, 0.1]] * 10,
+        5: [[0.7, 0.3]] * 6,
+        7: [[0.65, 0.3]] * 8,
+        10: [[0.5, 0.2]] * 7,
+        11: [[0.4, 0.2]] * 7,
+        16: [[0.42, 0.2]] * 6,
+    }
+    frames = {
+        1: [1, 4, 7, 10, 13, 16, 19, 22, 26, 30],
+        5: list(range(2, 8)),
+        7: list(range(12, 20)),
+        10: list(range(13, 20)),
+        11: list(range(14, 21)),
+        16: list(range(23, 29)),
+    }
+    confidences = {track_id: [0.8] * len(points) for track_id, points in histories.items()}
+
+    conditions, _, groups, raw_count = consolidate_track_results(
+        histories, confidences, frames, {}, minimum_groups=1,
+    )
+
+    assert raw_count == 6
+    assert len(groups) == 4
+    assert len(conditions) == 4
+    assert [group["track_ids"] for group in groups] == [[1], [5, 7], [10], [11, 16]]
+
+
+def test_legacy_results_hide_short_excess_fragments_but_keep_lameness_flags():
+    conditions = {
+        str(track_id): {"frames_observed": frames, "status": "LOW MOVEMENT", "severity": "watch"}
+        for track_id, frames in [(1, 394), (5, 13), (7, 276), (10, 78), (11, 51), (16, 30)]
+    }
+    lameness = {"1": {"status": "POSSIBLE LAMENESS", "confidence": 0.92}}
+
+    kept_conditions, kept_lameness, hidden = limit_reported_tracks(conditions, lameness, 4)
+
+    assert list(kept_conditions) == ["1", "7", "10", "11"]
+    assert list(kept_lameness) == ["1"]
+    assert hidden == 2
+
+
 def test_line_counter_counts_one_track_only_once_after_full_crossing():
     counter = LineCrossingCounter(CountingConfig(minimum_track_frames=3, hysteresis=0.03))
 
@@ -57,6 +123,15 @@ def test_line_counter_tracks_both_directions_across_different_ids():
     assert counter.total == 2
 
 
+def test_line_counter_does_not_lose_an_early_crossing_before_track_is_stable():
+    counter = LineCrossingCounter(CountingConfig(minimum_track_frames=3))
+
+    counter.update(9, (0.25, 0.5))
+    assert counter.update(9, (0.75, 0.5)) is None
+    assert counter.update(9, (0.76, 0.5)) == "forward"
+    assert counter.total == 1
+
+
 def test_line_counter_ignores_tracks_outside_roi():
     config = CountingConfig(roi_x1=0.2, roi_y1=0.2, roi_x2=0.8, roi_y2=0.8)
     counter = LineCrossingCounter(config)
@@ -71,6 +146,11 @@ def test_counting_config_rejects_invalid_roi():
         CountingConfig(roi_x1=0.8, roi_x2=0.2)
 
 
+def test_counting_config_rejects_a_line_zone_that_cannot_be_crossed_in_roi():
+    with pytest.raises(ValueError, match="hysteresis zone"):
+        CountingConfig(line_position=0.5, roi_x1=0.49, roi_x2=0.9)
+
+
 def test_dense_pass_only_triggers_for_a_few_wide_boxes():
     crowded = np.array([[0, 0, 400, 300], [350, 0, 750, 300]], dtype=float)
     ordinary = np.array([[0, 0, 100, 300], [350, 0, 450, 300]], dtype=float)
@@ -82,3 +162,12 @@ def test_dense_pass_only_triggers_for_a_few_wide_boxes():
 def test_nms_removes_overlapping_duplicate_boxes():
     boxes = [[0, 0, 100, 100], [5, 5, 105, 105], [200, 0, 300, 100]]
     assert _nms_detections(boxes, [0.9, 0.8, 0.7], threshold=0.5) == [0, 2]
+
+
+def test_video_count_uses_repeatable_peak_instead_of_reporting_zero():
+    counts = [0, 1, 2, 2, 2, 2, 2, 3, 8]
+    peak = _peak_frame_count(counts, top_k=5)
+
+    assert peak == 2
+    assert _reported_video_count(crossing_count=0, peak_visible_count=peak) == 2
+    assert _reported_video_count(crossing_count=4, peak_visible_count=peak) == 4

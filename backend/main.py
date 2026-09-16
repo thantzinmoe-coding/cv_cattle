@@ -11,6 +11,13 @@ mimetypes.init()
 mimetypes.add_type("video/webm", ".webm")
 mimetypes.add_type("video/mp4", ".mp4")
 
+# Automatically inject the bundled FFmpeg binary path for videos
+try:
+    import imageio_ffmpeg
+    os.environ["IMAGEIO_FFMPEG_EXE"] = imageio_ffmpeg.get_ffmpeg_exe()
+except ImportError:
+    pass
+
 # Ensure project root is on the path so prediction modules can be imported
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -18,10 +25,10 @@ from backend.routers import predict
 
 app = FastAPI(title="Cattle Counting API", version="1.0.0")
 
-# Allow requests from the Vite dev server
+# Allow requests from the Vite dev server on any port
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

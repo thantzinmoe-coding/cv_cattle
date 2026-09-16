@@ -12,8 +12,32 @@ function normalizeConditions(conditions) {
   return Object.entries(conditions || {}).map(([cowId, value]) => ({ cow_id: cowId, ...value }))
 }
 
-export default function ConditionPanel({ conditions, active = false }) {
-  const items = normalizeConditions(conditions)
+export default function ConditionPanel({ conditions, lameness = {}, reportedCount, active = false }) {
+  const allLameCows = normalizeConditions(lameness).filter(item => item.status === 'POSSIBLE LAMENESS')
+  const lameCowIds = new Set(allLameCows.map(item => String(item.cow_id)))
+  const allItems = normalizeConditions(conditions).map(item => (
+    lameCowIds.has(String(item.cow_id))
+      ? {
+          ...item,
+          status: 'POSSIBLE LAMENESS',
+          severity: 'watch',
+          description: 'The gait classifier flagged this track for review; the basic speed measurement cannot clear the flag.',
+        }
+      : item
+  ))
+  const limit = Number.isFinite(Number(reportedCount)) && Number(reportedCount) > 0
+    ? Number(reportedCount)
+    : allItems.length
+  const rankedIds = [...allItems]
+    .sort((left, right) => {
+      const lamenessDifference = Number(lameCowIds.has(String(right.cow_id))) - Number(lameCowIds.has(String(left.cow_id)))
+      return lamenessDifference || (right.frames_observed || 0) - (left.frames_observed || 0)
+    })
+    .slice(0, limit)
+    .map(item => String(item.cow_id))
+  const visibleIds = new Set(rankedIds)
+  const items = allItems.filter(item => visibleIds.has(String(item.cow_id)))
+  const lameCows = allLameCows.filter(item => visibleIds.has(String(item.cow_id)))
   const attentionCount = items.filter(item => item.severity === 'watch').length
 
   return (
@@ -29,7 +53,30 @@ export default function ConditionPanel({ conditions, active = false }) {
         </div>
       </header>
 
-      <div className="p-4">
+      <div className="p-4 space-y-4">
+        {lameCows.length > 0 && (
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4">
+            <h3 className="font-bold text-rose-300 flex items-center gap-2">
+              <span className="animate-pulse">🚨</span> Possible lameness flag
+            </h3>
+            <div className="mt-3 space-y-2">
+              {lameCows.map(lame => (
+                <div key={lame.cow_id} className="flex items-center gap-3 rounded-lg bg-black/20 p-2.5 text-sm">
+                  {lame.thumbnail_url ? (
+                    <img src={lame.thumbnail_url} alt={`Cow ${lame.cow_id} crop`} className="h-12 w-12 rounded object-cover border border-rose-500/50" />
+                  ) : (
+                    <div className="h-12 w-12 rounded bg-rose-500/10 grid place-items-center text-xl">🐄</div>
+                  )}
+                  <div className="flex-1">
+                    <span className="block font-bold text-white">Cow #{lame.cow_id}</span>
+                    <span className="block text-xs text-rose-200 mt-0.5">Model score: {Math.round(lame.confidence * 100)}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-rose-200/60">The movement pattern model flagged this track for review. Confirm persistent concerns with a veterinarian.</p>
+          </div>
+        )}
         {items.length === 0 ? (
           <div className="rounded-xl border border-dashed border-white/10 px-5 py-8 text-center">
             <div className="mx-auto grid h-10 w-10 place-items-center rounded-full bg-white/5 text-slate-400">◇</div>

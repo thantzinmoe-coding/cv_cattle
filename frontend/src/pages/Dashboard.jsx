@@ -36,7 +36,7 @@ export default function Dashboard() {
               Count cattle, maintain stable tracking IDs, and surface movement conditions from uploaded videos or a live camera feed.
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
-              <Link to="/predict" className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-bold text-[#092116] shadow-lg shadow-emerald-950/40 transition hover:bg-emerald-300">
+              <Link to="/monitor" className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-bold text-[#092116] shadow-lg shadow-emerald-950/40 transition hover:bg-emerald-300">
                 Open cattle monitor →
               </Link>
               <span className="flex items-center rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-slate-300">
@@ -45,9 +45,9 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="grid min-w-[260px] gap-3 sm:grid-cols-2 xl:grid-cols-1">
+          <div className="grid min-w-[260px] gap-3 sm:grid-cols-3 xl:grid-cols-1">
             <div className="rounded-2xl border border-white/10 bg-black/20 p-4 backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">System</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">System API</p>
               <p className={`mt-2 text-lg font-bold ${apiOnline ? 'text-emerald-300' : 'text-rose-300'}`}>{health === null ? 'Checking…' : apiOnline ? 'Online' : 'Unavailable'}</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-black/20 p-4 backdrop-blur">

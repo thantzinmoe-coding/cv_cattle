@@ -21,26 +21,33 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".mp4", ".avi", ".mov", "
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 
-# Lazily loaded model shared across WebSocket connections
-_ws_model = None
-_ws_model_lock = threading.Lock()
+# Each live connection needs its own tracker state. Model construction is
+# serialized to avoid concurrent device initialization, while inference is
+# serialized separately because the application may run on one GPU.
+_ws_model_load_lock = threading.Lock()
 _ws_inference_lock = threading.Lock()
 _upload_inference_lock = asyncio.Lock()
 
 
-def _get_ws_model():
-    """Load the YOLO model once and reuse it for all WebSocket frames."""
-    global _ws_model
-    with _ws_model_lock:
-        if _ws_model is None:
-            import sys
-            sys.path.insert(0, str(PROJECT_ROOT))
-            from ultralytics import YOLO
-            model_path = PROJECT_ROOT / "outputs" / "models" / "cattle_count_best.pt"
-            if not model_path.exists():
-                raise FileNotFoundError("Cattle detection model is not installed on the server.")
-            _ws_model = YOLO(str(model_path))
-        return _ws_model
+def _create_ws_model():
+    """Create an isolated YOLO predictor/tracker for one live connection."""
+    with _ws_model_load_lock:
+        import sys
+        sys.path.insert(0, str(PROJECT_ROOT))
+        from ultralytics import YOLO
+        model_path = PROJECT_ROOT / "outputs" / "models" / "cattle_count_best.pt"
+        if not model_path.exists():
+            raise FileNotFoundError("Cattle detection model is not installed on the server.")
+        return YOLO(str(model_path))
+
+
+def _reported_cow_count(result: dict) -> int:
+    """Normalize old and new result payloads without hiding visible cattle."""
+    if result.get("cows_detected") is not None:
+        return int(result["cows_detected"])
+    crossing_count = int(result.get("crossing_count", result.get("unique_cows_detected", 0)) or 0)
+    peak_visible_count = int(result.get("peak_visible_count", 0) or 0)
+    return max(crossing_count, peak_visible_count)
 
 
 @router.post("/image")
@@ -54,7 +61,8 @@ async def predict_image(
     roi_y2: float = Form(1.0),
     confidence: float = Form(0.30),
 ):
-    suffix = Path(file.filename).suffix.lower()
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix}")
 
@@ -95,7 +103,7 @@ async def predict_image(
 
     output_name = result.get("output_video") or result.get("output_image")
     result_url = f"/outputs/predictions/{output_name}" if output_name else None
-    cow_count = result.get("cows_detected", result.get("unique_cows_detected", 0))
+    cow_count = _reported_cow_count(result)
 
     return JSONResponse({
         "message": "Prediction complete.",
@@ -103,10 +111,12 @@ async def predict_image(
         "result_image_url": result_url,
         "cow_count": cow_count,
         "count_mode": result.get("count_mode"),
+        "crossing_count": result.get("crossing_count", 0),
         "forward_count": result.get("forward_count", 0),
         "reverse_count": result.get("reverse_count", 0),
         "peak_visible_count": result.get("peak_visible_count", cow_count),
-        "original_filename": file.filename,
+        "stable_track_count": result.get("stable_track_count", 0),
+        "original_filename": filename,
         "detected_ids": result.get("detected_ids", []),
         "lameness_results": result.get("lameness_results", {}),
         "condition_results": result.get("condition_results", {}),
@@ -130,7 +140,7 @@ async def webcam_ws(websocket: WebSocket):
     await websocket.accept()
 
     try:
-        model = _get_ws_model()
+        model = await asyncio.to_thread(_create_ws_model)
     except FileNotFoundError as e:
         await websocket.send_json({"error": str(e)})
         await websocket.close()
@@ -161,7 +171,7 @@ async def webcam_ws(websocket: WebSocket):
         await websocket.close(code=1008)
         return
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     track_history = {}
     confidence_history = {}
     crossing_counter = LineCrossingCounter(config)
@@ -189,21 +199,27 @@ async def webcam_ws(websocket: WebSocket):
                         verbose=False,
                     )
                 r = results[0]
-                visible_count = 0
                 annotated = r.plot()
                 conditions = []
 
+                boxes = (
+                    r.boxes.xyxy.cpu().numpy()
+                    if r.boxes is not None else np.empty((0, 4), dtype=float)
+                )
+                frame_height, frame_width = r.orig_shape
+                centers = [
+                    [((x1 + x2) / 2) / frame_width, ((y1 + y2) / 2) / frame_height]
+                    for x1, y1, x2, y2 in boxes
+                ]
+                visible_count = sum(1 for center in centers if config.contains(center))
+
                 if r.boxes is not None and r.boxes.id is not None:
                     ids = r.boxes.id.int().cpu().tolist()
-                    boxes = r.boxes.xyxy.cpu().numpy()
                     confidences = r.boxes.conf.cpu().tolist() if r.boxes.conf is not None else [0.0] * len(ids)
-                    frame_height, frame_width = r.orig_shape
                     for index, cow_id in enumerate(ids):
-                        x1, y1, x2, y2 = boxes[index]
-                        center = [((x1 + x2) / 2) / frame_width, ((y1 + y2) / 2) / frame_height]
+                        center = centers[index]
                         if not config.contains(center):
                             continue
-                        visible_count += 1
                         history = track_history.setdefault(cow_id, [])
                         history.append(center)
                         if len(history) > 60:
@@ -232,7 +248,9 @@ async def webcam_ws(websocket: WebSocket):
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 180), 2, cv2.LINE_AA)
 
                 # Encode annotated frame as JPEG for sending back
-                _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                encoded, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                if not encoded:
+                    raise RuntimeError("Could not encode the annotated camera frame.")
                 return visible_count, conditions, base64.b64encode(buf.tobytes()).decode()
 
             visible_count, conditions, frame_b64 = await loop.run_in_executor(None, _infer, frame)
@@ -259,3 +277,39 @@ async def webcam_ws(websocket: WebSocket):
 async def start_webcam():
     """Legacy endpoint — kept for compatibility. Real-time webcam now uses WebSocket."""
     return {"message": "Use the WebSocket endpoint /predict/ws/webcam for live webcam detection."}
+
+@router.get("/jobs")
+async def get_jobs():
+    """Retrieve historical prediction jobs from outputs/metrics/jobs"""
+    import json
+    import sys
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from core.predict import limit_reported_tracks
+
+    jobs_dir = PROJECT_ROOT / "outputs" / "metrics" / "jobs"
+    if not jobs_dir.exists():
+        return []
+
+    jobs = []
+    for file in jobs_dir.glob("*.json"):
+        try:
+            with open(file, "r") as f:
+                data = json.load(f)
+                data["created_at"] = file.stat().st_mtime
+                data["cow_count"] = _reported_cow_count(data)
+                data["crossing_count"] = int(data.get("crossing_count", 0) or 0)
+                data["original_filename"] = Path(data.get("source", "")).name or "Previous Job"
+                conditions, lameness, hidden_fragments = limit_reported_tracks(
+                    data.get("condition_results", {}),
+                    data.get("lameness_results", {}),
+                    data["cow_count"],
+                )
+                data["condition_results"] = conditions
+                data["lameness_results"] = lameness
+                data["hidden_track_fragments"] = hidden_fragments
+                jobs.append(data)
+        except Exception:
+            pass
+
+    jobs.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return jobs

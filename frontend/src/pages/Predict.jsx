@@ -1,7 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import ConditionPanel from '../components/ConditionPanel'
+import KnowledgeSharing from '../components/KnowledgeSharing'
 
 const FRAME_INTERVAL_MS = 200
+const DEFAULT_COUNTING_CONFIG = {
+  lineOrientation: 'vertical',
+  linePosition: 0.5,
+  confidence: 0.3,
+  roi: { x1: 0, y1: 0, x2: 1, y2: 1 },
+}
 
 export default function Predict() {
   const [mode, setMode] = useState('upload')
@@ -11,10 +18,8 @@ export default function Predict() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [dragging, setDragging] = useState(false)
-  const [lineOrientation, setLineOrientation] = useState('vertical')
-  const [linePosition, setLinePosition] = useState(0.5)
-  const [confidence, setConfidence] = useState(0.3)
-  const [roi, setRoi] = useState({ x1: 0, y1: 0, x2: 1, y2: 1 })
+  const [jobs, setJobs] = useState([])
+  const { lineOrientation, linePosition, confidence, roi } = DEFAULT_COUNTING_CONFIG
 
   const [camActive, setCamActive] = useState(false)
   const [camError, setCamError] = useState(null)
@@ -30,6 +35,7 @@ export default function Predict() {
   const canvasRef = useRef(null)
   const wsRef = useRef(null)
   const timerRef = useRef(null)
+  const frameInFlightRef = useRef(false)
 
   function stopCamera() {
     if (timerRef.current) {
@@ -37,9 +43,11 @@ export default function Predict() {
       timerRef.current = null
     }
     if (wsRef.current) {
-      wsRef.current.close()
+      const socket = wsRef.current
       wsRef.current = null
+      socket.close()
     }
+    frameInFlightRef.current = false
     if (videoRef.current?.srcObject) {
       videoRef.current.srcObject.getTracks().forEach(track => track.stop())
       videoRef.current.srcObject = null
@@ -49,6 +57,38 @@ export default function Predict() {
 
   useEffect(() => () => stopCamera(), [])
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
+
+
+
+  useEffect(() => {
+    fetch('/predict/jobs')
+      .then(res => res.json())
+      .then(setJobs)
+      .catch(console.error)
+  }, [])
+
+  function loadJob(job) {
+    chooseMode('upload')
+    setFile(null)
+    setPreview(null)
+    setError(null)
+
+    const output_name = job.output_video || job.output_image
+    setResult({
+      job_id: job.job_id,
+      result_image_url: output_name ? `/outputs/predictions/${output_name}` : null,
+      cow_count: job.cow_count ?? job.cows_detected ?? job.unique_cows_detected ?? 0,
+      count_mode: job.count_mode,
+      crossing_count: job.crossing_count ?? 0,
+      forward_count: job.forward_count ?? 0,
+      reverse_count: job.reverse_count ?? 0,
+      peak_visible_count: job.peak_visible_count ?? job.cow_count ?? job.cows_detected ?? 0,
+      stable_track_count: job.stable_track_count ?? job.detected_ids?.length ?? 0,
+      original_filename: job.original_filename || (job.source ? job.source.split('\\').pop().split('/').pop() : 'Previous Job'),
+      condition_results: job.condition_results || {},
+      lameness_results: job.lameness_results || {},
+    })
+  }
 
   function chooseMode(nextMode) {
     if (nextMode !== 'live') stopCamera()
@@ -88,6 +128,7 @@ export default function Predict() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.detail || 'Analysis failed')
       setResult(data)
+      fetch('/predict/jobs').then(response => response.json()).then(setJobs).catch(() => {})
     } catch (requestError) {
       setError(requestError.message)
     } finally {
@@ -115,9 +156,17 @@ export default function Predict() {
       return
     }
 
-    videoRef.current.srcObject = stream
-    await videoRef.current.play()
+    try {
+      videoRef.current.srcObject = stream
+      await videoRef.current.play()
+    } catch (cameraError) {
+      stream.getTracks().forEach(track => track.stop())
+      if (videoRef.current) videoRef.current.srcObject = null
+      setCamError(`Camera could not start: ${cameraError.message}`)
+      return
+    }
     setCamActive(true)
+    frameInFlightRef.current = false
 
     const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const query = new URLSearchParams({
@@ -131,7 +180,15 @@ export default function Predict() {
     wsRef.current = socket
 
     socket.onmessage = event => {
-      const data = JSON.parse(event.data)
+      frameInFlightRef.current = false
+      let data
+      try {
+        data = JSON.parse(event.data)
+      } catch {
+        setCamError('The live analysis server returned an invalid response.')
+        stopCamera()
+        return
+      }
       if (data.error) {
         setCamError(data.error)
         stopCamera()
@@ -150,22 +207,42 @@ export default function Predict() {
       stopCamera()
     }
 
+    socket.onclose = () => {
+      if (wsRef.current === socket) {
+        setCamError(current => current || 'The live analysis connection closed unexpectedly.')
+        stopCamera()
+      }
+    }
+
     const canvas = canvasRef.current
     const context = canvas.getContext('2d')
     timerRef.current = setInterval(() => {
-      if (!videoRef.current || socket.readyState !== WebSocket.OPEN) return
+      if (
+        !videoRef.current
+        || socket.readyState !== WebSocket.OPEN
+        || frameInFlightRef.current
+        || socket.bufferedAmount > 0
+      ) return
+      frameInFlightRef.current = true
       canvas.width = videoRef.current.videoWidth || 1280
       canvas.height = videoRef.current.videoHeight || 720
       context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
       canvas.toBlob(blob => {
-        if (blob && socket.readyState === WebSocket.OPEN) socket.send(blob)
+        if (blob && socket.readyState === WebSocket.OPEN) {
+          try {
+            socket.send(blob)
+          } catch {
+            frameInFlightRef.current = false
+          }
+        } else {
+          frameInFlightRef.current = false
+        }
       }, 'image/jpeg', 0.82)
     }, FRAME_INTERVAL_MS)
   }
 
   const isVideo = Boolean(file && (file.type.startsWith('video/') || /\.(mp4|avi|mov|mkv)$/i.test(file.name)))
   const cowCount = result?.cow_count ?? null
-  const updateRoi = (key, value) => setRoi(current => ({ ...current, [key]: Number(value) }))
 
   return (
     <div className="min-h-screen p-5 md:p-8 lg:p-10 fade-in">
@@ -188,36 +265,6 @@ export default function Predict() {
           ◉ Live camera
         </button>
       </div>
-
-      <section className="mt-5 rounded-2xl border border-white/8 bg-[#121b17] p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><p className="text-sm font-bold text-white">Camera counting zone</p><p className="mt-1 text-xs text-slate-500">Only tracked cattle inside the blue ROI can cross the yellow line and enter the session count.</p></div>
-          <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300">One count per track ID</span>
-        </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
-          <label className="text-xs font-bold text-slate-400">Line orientation
-            <select value={lineOrientation} disabled={camActive || loading} onChange={event => setLineOrientation(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b120f] px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-400/60">
-              <option value="vertical">Vertical — left/right movement</option>
-              <option value="horizontal">Horizontal — up/down movement</option>
-            </select>
-          </label>
-          <label className="text-xs font-bold text-slate-400">Line position: {Math.round(linePosition * 100)}%
-            <input type="range" min="0.1" max="0.9" step="0.01" value={linePosition} disabled={camActive || loading} onChange={event => setLinePosition(Number(event.target.value))} className="mt-4 w-full accent-emerald-400" />
-          </label>
-          <label className="text-xs font-bold text-slate-400">Detection confidence: {confidence.toFixed(2)}
-            <input type="range" min="0.15" max="0.75" step="0.01" value={confidence} disabled={camActive || loading} onChange={event => setConfidence(Number(event.target.value))} className="mt-4 w-full accent-emerald-400" />
-          </label>
-        </div>
-        <details className="mt-4 border-t border-white/8 pt-4">
-          <summary className="cursor-pointer text-xs font-bold text-slate-400">Advanced ROI boundaries</summary>
-          <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-            {Object.entries(roi).map(([key, value]) => <label key={key} className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{key}
-              <input type="number" min="0" max="1" step="0.01" value={value} disabled={camActive || loading} onChange={event => updateRoi(key, event.target.value)} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#0b120f] px-3 py-2 text-sm text-white outline-none focus:border-emerald-400/60" />
-            </label>)}
-          </div>
-          <p className="mt-2 text-[11px] text-slate-600">Coordinates are normalized from 0 to 1. Keep x1 below x2 and y1 below y2.</p>
-        </details>
-      </section>
 
       {mode === 'upload' ? (
         <div className="mt-6 space-y-6">
@@ -252,19 +299,33 @@ export default function Predict() {
 
               {result && (
                 <div className="grid grid-cols-2 gap-3 rounded-2xl border border-white/8 bg-[#121b17] p-4">
-                  <div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">{result.count_mode === 'line_crossing' ? 'Total crossings' : 'Visible in ROI'}</p><p className="mt-1 text-2xl font-extrabold text-emerald-300">{cowCount ?? 0}</p></div>
+                  <div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">{result.count_mode === 'line_crossing' ? 'Cattle detected' : 'Visible in ROI'}</p><p className="mt-1 text-2xl font-extrabold text-emerald-300">{cowCount ?? 0}</p></div>
                   <div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">Peak visible</p><p className="mt-1 text-2xl font-extrabold text-white">{result.peak_visible_count ?? cowCount ?? 0}</p></div>
-                  {result.count_mode === 'line_crossing' && <><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">Forward</p><p className="mt-1 text-xl font-bold text-white">{result.forward_count ?? 0}</p></div><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">Reverse</p><p className="mt-1 text-xl font-bold text-white">{result.reverse_count ?? 0}</p></div></>}
+                  {result.count_mode === 'line_crossing' && <><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">Line crossings</p><p className="mt-1 text-xl font-bold text-white">{result.crossing_count ?? 0}</p></div><div><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">Forward / reverse</p><p className="mt-1 text-xl font-bold text-white">{result.forward_count ?? 0} / {result.reverse_count ?? 0}</p></div></>}
                 </div>
               )}
 
               {error && <div className="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-300">{error}</div>}
+
+              {jobs.length > 0 && !result && !file && (
+                <div className="mt-6 rounded-2xl border border-white/8 bg-[#121b17] p-4">
+                  <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Previous Jobs</p>
+                  <div className="custom-scrollbar grid max-h-48 gap-2 overflow-y-auto pr-2">
+                    {jobs.map(job => (
+                      <button key={job.job_id} onClick={() => loadJob(job)} className="flex items-center justify-between rounded-xl bg-[#1a251f] px-3 py-2.5 text-left transition hover:bg-[#223129]">
+                        <span className="max-w-[200px] truncate text-sm text-white">{job.source ? job.source.split('\\').pop().split('/').pop() : job.job_id}</span>
+                        <span className="whitespace-nowrap text-xs font-bold text-emerald-400">{job.cow_count ?? job.cows_detected ?? job.unique_cows_detected ?? 0} cows</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
 
             <section className="overflow-hidden rounded-2xl border border-white/8 bg-[#080d0b] min-h-[360px]">
               <div className="flex items-center justify-between border-b border-white/8 bg-[#121b17] px-4 py-3">
                 <div><p className="text-sm font-bold text-white">Visual analysis</p><p className="text-xs text-slate-500">{result ? 'Annotated model output' : 'Source preview'}</p></div>
-                {result && <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300">{cowCount ?? 0} {result.count_mode === 'line_crossing' ? 'crossings counted' : 'cattle visible'}</span>}
+                {result && <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300">{cowCount ?? 0} cattle detected</span>}
               </div>
               <div className="grid min-h-[310px] place-items-center">
                 {result?.result_image_url ? (
@@ -282,7 +343,8 @@ export default function Predict() {
             </section>
           </div>
 
-          <ConditionPanel conditions={result?.condition_results} active={loading} />
+          <ConditionPanel conditions={result?.condition_results} lameness={result?.lameness_results} reportedCount={cowCount} active={loading} />
+          <KnowledgeSharing />
         </div>
       ) : (
         <div className="mt-6 grid gap-6 2xl:grid-cols-[1.35fr_0.85fr]">
@@ -322,7 +384,8 @@ export default function Predict() {
             {camError && <div className="border-t border-rose-400/20 bg-rose-400/10 px-5 py-3 text-sm text-rose-300">{camError}</div>}
           </section>
 
-          <ConditionPanel conditions={camConditions} active={camActive} />
+          <ConditionPanel conditions={camConditions} lameness={{}} active={camActive} />
+          <KnowledgeSharing />
         </div>
       )}
     </div>

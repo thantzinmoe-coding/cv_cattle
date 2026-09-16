@@ -1,0 +1,114 @@
+{
+  "trained_at": "2026-09-14T02:25:38.619267+00:00",
+  "sklearn_version": "1.7.2",
+  "feature_version": 2,
+  "sequence_length": 16,
+  "sample_fps": 10.0,
+  "train_videos": [
+    "Normal/N (17).mp4",
+    "Lame/L (17).mp4",
+    "Lame/L (18).mp4",
+    "Lame/L (7).mp4",
+    "Lame/L (14).mp4",
+    "Normal/N (24).mp4",
+    "Normal/N (2).mp4",
+    "Normal/N (11).mp4",
+    "Lame/L (5).mp4",
+    "Normal/N (14).mp4",
+    "Lame/L (20).mp4",
+    "Normal/N (18).mp4",
+    "Normal/N (8).mp4",
+    "Lame/L (6).mp4",
+    "Lame/L (1).mp4",
+    "Lame/L (19).mp4",
+    "Lame/L (24).mp4",
+    "Normal/N (3).mp4",
+    "Lame/L (4).mp4",
+    "Normal/N (1).mp4",
+    "Lame/L (23).mp4",
+    "Normal/N (10).mp4",
+    "Normal/N (20).mp4",
+    "Normal/N (21).mp4",
+    "Normal/N (13).mp4",
+    "Lame/L (10).mp4",
+    "Normal/N (25).mp4",
+    "Lame/L (16).mp4",
+    "Lame/L (12).mp4",
+    "Normal/N (7).mp4",
+    "Lame/L (22).mp4",
+    "Normal/N (6).mp4",
+    "Normal/N (12).mp4",
+    "Lame/L (15).mp4",
+    "Normal/N (4).mp4"
+  ],
+  "test_videos": [
+    "Lame/L (21).mp4",
+    "Lame/L (8).mp4",
+    "Normal/N (9).mp4",
+    "Normal/N (19).mp4",
+    "Normal/N (16).mp4",
+    "Lame/L (9).mp4",
+    "Normal/N (5).mp4",
+    "Normal/N (15).mp4",
+    "Lame/L (3).mp4",
+    "Lame/L (25).mp4",
+    "Lame/L (2).mp4",
+    "Normal/N (22).mp4"
+  ],
+  "train_sequences": 213,
+  "test_sequences": 80,
+  "sequence_accuracy": 0.625,
+  "video_accuracy": 0.6666666666666666,
+  "video_confusion_matrix": [
+    [
+      4,
+      2
+    ],
+    [
+      2,
+      4
+    ]
+  ],
+  "video_classification_report": {
+    "Normal": {
+      "precision": 0.6666666666666666,
+      "recall": 0.6666666666666666,
+      "f1-score": 0.6666666666666666,
+      "support": 6.0
+    },
+    "Lame": {
+      "precision": 0.6666666666666666,
+      "recall": 0.6666666666666666,
+      "f1-score": 0.6666666666666666,
+      "support": 6.0
+    },
+    "accuracy": 0.6666666666666666,
+    "macro avg": {
+      "precision": 0.6666666666666666,
+      "recall": 0.6666666666666666,
+      "f1-score": 0.6666666666666666,
+      "support": 12.0
+    },
+    "weighted avg": {
+      "precision": 0.6666666666666666,
+      "recall": 0.6666666666666666,
+      "f1-score": 0.6666666666666666,
+      "support": 12.0
+    }
+  },
+  "test_video_lame_probabilities": {
+    "Lame/L (2).mp4": 0.761347,
+    "Lame/L (21).mp4": 0.486384,
+    "Lame/L (25).mp4": 0.73568,
+    "Lame/L (3).mp4": 0.532456,
+    "Lame/L (8).mp4": 0.379295,
+    "Lame/L (9).mp4": 0.578227,
+    "Normal/N (15).mp4": 0.878693,
+    "Normal/N (16).mp4": 0.422859,
+    "Normal/N (19).mp4": 0.613594,
+    "Normal/N (22).mp4": 0.431719,
+    "Normal/N (5).mp4": 0.446234,
+    "Normal/N (9).mp4": 0.054455
+  },
+  "previous_model_backup": "C:\\Users\\Thant Zin Moe\\Desktop\\Gintama\\Ai-Project\\cv_cattle\\outputs\\models\\lame_checkpoint.previous.joblib"
+}

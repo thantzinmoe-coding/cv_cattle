@@ -3,7 +3,11 @@ import { NavLink } from 'react-router-dom'
 
 const nav = [
   { to: '/', label: 'Overview', icon: '⌂' },
-  { to: '/predict', label: 'Cattle Monitor', icon: '◉' },
+  { to: '/monitor', label: 'Cattle Monitor', icon: '◉' },
+  { to: '/history', label: 'History & Reports', icon: '📊' },
+  { to: '/wiki', label: 'Health Hub', icon: '📖' },
+  { to: '/alerts', label: 'Vet Incident Log', icon: '📋' },
+  { to: '/setup', label: 'Camera Setup', icon: '📹' },
 ]
 
 export default function Sidebar() {
@@ -30,10 +34,9 @@ export default function Sidebar() {
             to={to}
             end={to === '/'}
             className={({ isActive }) =>
-              `flex items-center justify-center lg:justify-start gap-3 px-3 lg:px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
-                isActive
-                  ? 'bg-emerald-400/12 text-emerald-300 border border-emerald-400/20 shadow-sm'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+              `flex items-center justify-center lg:justify-start gap-3 px-3 lg:px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${isActive
+                ? 'bg-emerald-400/12 text-emerald-300 border border-emerald-400/20 shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
               }`
             }
           >
